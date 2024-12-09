@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="WinBoost.MainPage">
+    <Grid>
+        <!-- Navigation Bar -->
+        <Grid RowDefinitions="Auto,*">
+            <StackLayout Orientation="Horizontal" BackgroundColor="#0078D7" Padding="10">
+                <Button Text="Développeurs" x:Name="DevToolsButton" Clicked="OnDevToolsClicked" />
+                <Button Text="Gaming" x:Name="GamingButton" Clicked="OnGamingClicked" />
+                <Button Text="Utilisateurs Avancés" x:Name="AdvancedToolsButton" Clicked="OnAdvancedToolsClicked" />
+            </StackLayout>
+            <!-- Main Content -->
+            <ContentView x:Name="MainContent" Grid.Row="1" />
+        </Grid>
+    </Grid>
+</ContentPage>
