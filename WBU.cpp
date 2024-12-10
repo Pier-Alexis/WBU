@@ -3,19 +3,22 @@
 #include <psapi.h>
 #include <sstream>
 #include <filesystem>
+#include <commdlg.h>
 
 #define ID_BUTTON_CHECK 1
 #define ID_BUTTON_CLEAN 2
 #define ID_BUTTON_DISK 3
 #define ID_MENU_EXIT 4
 #define ID_MENU_ABOUT 5
+#define ID_PROGRESS_BAR 6
 
 // Prototypes
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 std::string GetSystemHealth();
-void CleanTemporaryFiles(HWND hwnd);
-std::string AnalyzeDiskSpace();
+void CleanTemporaryFiles(HWND hwnd, HWND progressBar);
+std::string AnalyzeDiskSpace(const std::string& path);
 void ShowAboutDialog(HWND hwnd);
+std::string SelectDisk(HWND hwnd);
 
 // Point d'entrée principal
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
@@ -58,6 +61,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 // Gestionnaire de la fenêtre principale
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    static HWND progressBar;
+
     switch (uMsg) {
     case WM_CREATE: {
         // Ajouter les boutons avec des styles personnalisés
@@ -89,6 +94,17 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         );
         SendMessage(btnDisk, WM_SETFONT, (WPARAM)hFont, TRUE);
 
+        // Barre de progression
+        progressBar = CreateWindowEx(
+            0, PROGRESS_CLASS, NULL,
+            WS_CHILD | WS_VISIBLE,
+            50, 300, 500, 30,
+            hwnd, (HMENU)ID_PROGRESS_BAR, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL
+        );
+
+        SendMessage(progressBar, PBM_SETRANGE, 0, MAKELPARAM(0, 100)); // Définit la plage à 0-100
+        SendMessage(progressBar, PBM_SETPOS, 0, 0); // Position initiale
+
         // Ajouter un menu
         HMENU hMenu = CreateMenu();
         HMENU hFileMenu = CreateMenu();
@@ -112,12 +128,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             break;
         }
         case ID_BUTTON_CLEAN: {
-            CleanTemporaryFiles(hwnd);
+            CleanTemporaryFiles(hwnd, progressBar);
             break;
         }
         case ID_BUTTON_DISK: {
-            std::string diskInfo = AnalyzeDiskSpace();
-            MessageBox(hwnd, diskInfo.c_str(), "Disk Space Analysis", MB_OK | MB_ICONINFORMATION);
+            std::string diskPath = SelectDisk(hwnd);
+            if (!diskPath.empty()) {
+                std::string diskInfo = AnalyzeDiskSpace(diskPath);
+                MessageBox(hwnd, diskInfo.c_str(), "Disk Space Analysis", MB_OK | MB_ICONINFORMATION);
+            }
             break;
         }
         case ID_MENU_EXIT: {
@@ -162,34 +181,45 @@ std::string GetSystemHealth() {
 }
 
 // Fonction pour nettoyer les fichiers temporaires
-void CleanTemporaryFiles(HWND hwnd) {
+void CleanTemporaryFiles(HWND hwnd, HWND progressBar) {
     char tempPath[MAX_PATH];
     GetTempPath(MAX_PATH, tempPath);
 
-    int deletedCount = 0;
+    int totalFiles = 0, deletedFiles = 0;
     try {
+        for (const auto& entry : std::filesystem::directory_iterator(tempPath)) {
+            totalFiles++;
+        }
+
+        int progress = 0;
         for (const auto& entry : std::filesystem::directory_iterator(tempPath)) {
             try {
                 std::filesystem::remove_all(entry.path());
-                deletedCount++;
+                deletedFiles++;
+                progress = (deletedFiles * 100) / totalFiles;
+                SendMessage(progressBar, PBM_SETPOS, progress, 0);
             } catch (...) {
                 // Ignorer les erreurs
             }
         }
+
         std::ostringstream msg;
-        msg << "Deleted " << deletedCount << " temporary files.";
+        msg << "Deleted " << deletedFiles << " temporary files.";
         MessageBox(hwnd, msg.str().c_str(), "Clean Temporary Files", MB_OK | MB_ICONINFORMATION);
     } catch (...) {
         MessageBox(hwnd, "Error cleaning temporary files.", "Error", MB_OK | MB_ICONERROR);
     }
+
+    SendMessage(progressBar, PBM_SETPOS, 0, 0); // Réinitialise la barre
 }
 
 // Fonction pour analyser l'espace disque
-std::string AnalyzeDiskSpace() {
+std::string AnalyzeDiskSpace(const std::string& path) {
     ULARGE_INTEGER freeBytesAvailable, totalBytes, totalFreeBytes;
 
-    if (GetDiskFreeSpaceEx(NULL, &freeBytesAvailable, &totalBytes, &totalFreeBytes)) {
+    if (GetDiskFreeSpaceEx(path.c_str(), &freeBytesAvailable, &totalBytes, &totalFreeBytes)) {
         std::ostringstream diskInfo;
+        diskInfo << "Disk: " << path << "\n";
         diskInfo << "Total Disk Space: " << totalBytes.QuadPart / (1024 * 1024 * 1024) << " GB\n";
         diskInfo << "Free Disk Space: " << totalFreeBytes.QuadPart / (1024 * 1024 * 1024) << " GB\n";
         diskInfo << "Used Disk Space: "
@@ -200,9 +230,23 @@ std::string AnalyzeDiskSpace() {
     return "Error retrieving disk space information.";
 }
 
+// Fonction pour sélectionner un disque
+std::string SelectDisk(HWND hwnd) {
+    char path[MAX_PATH] = "";
+    BROWSEINFO bi = { 0 };
+    bi.lpszTitle = "Select a Disk";
+    LPITEMIDLIST pidl = SHBrowseForFolder(&bi);
+
+    if (pidl != 0) {
+        SHGetPathFromIDList(pidl, path);
+        return std::string(path);
+    }
+    return "";
+}
+
 // Fonction pour afficher une boîte de dialogue À propos
 void ShowAboutDialog(HWND hwnd) {
     MessageBox(hwnd,
-        "Windows Boost Utils (WBU)\nVersion 2.0\nCreated by You",
+        "Windows Boost Utils (WBU)\nVersion 3.0\nCreated by You",
         "About WBU", MB_OK | MB_ICONINFORMATION);
 }
