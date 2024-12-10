@@ -6,3 +6,6 @@
 - **GPU utilisation**
 - **SSD utilisation**
 - **Minimized Task Manager**
+
+## License
+-**GNU V3 Public License**
