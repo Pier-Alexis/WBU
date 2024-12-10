@@ -1,31 +1,24 @@
+
 #include <windows.h>
 #include <string>
 #include <psapi.h>
 #include <sstream>
-#include <filesystem>
 #include <vector>
+#include <tlhelp32.h>
 #include <commctrl.h>
 #include <commdlg.h>
 
-#define ID_BUTTON_CHECK 1
-#define ID_BUTTON_CLEAN 2
-#define ID_BUTTON_DISK 3
-#define ID_MENU_EXIT 4
-#define ID_MENU_ABOUT 5
-#define ID_PROGRESS_BAR 6
-#define ID_LISTVIEW 7
-#define ID_CHECK_TEMP 8
-#define ID_CHECK_BROWSER 9
+#define ID_BUTTON_GAME 10
+#define ID_BUTTON_MONITOR 11
+#define ID_LISTVIEW_PROCESSES 12
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
-std::string GetSystemHealth();
-void CleanTemporaryFiles(HWND hwnd, HWND progressBar, bool cleanBrowserCache);
-std::vector<std::pair<std::string, std::string>> ListTemporaryFiles();
-std::string AnalyzeDiskSpace(const std::string& path);
-void ShowAboutDialog(HWND hwnd);
-std::string SelectDisk(HWND hwnd);
-void AddListViewColumns(HWND hwndListView);
-void AddListViewItems(HWND hwndListView, const std::vector<std::pair<std::string, std::string>>& files);
+void OptimizeForGaming(HWND hwnd);
+bool KillUnwantedProcesses(const std::vector<std::string>& processesToKill);
+bool SetHighPriority(const std::string& processName);
+void MonitorPerformance(HWND hwnd);
+void AddProcessListView(HWND hwnd, HWND& listViewProcesses);
+void PopulateProcessList(HWND listViewProcesses);
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     const char CLASS_NAME[] = "WBUWindowClass";
@@ -66,7 +59,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    static HWND progressBar, listView, checkTemp, checkBrowser;
+    static HWND listViewProcesses;
 
     switch (uMsg) {
     case WM_CREATE: {
@@ -74,105 +67,34 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                                  OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
                                  DEFAULT_PITCH | FF_SWISS, "Segoe UI");
 
-        HWND btnCheck = CreateWindow(
-            "BUTTON", "Check System Health",
+        HWND btnGame = CreateWindow(
+            "BUTTON", "Optimize for Gaming",
             WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
             50, 50, 250, 50,
-            hwnd, (HMENU)ID_BUTTON_CHECK, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL
+            hwnd, (HMENU)ID_BUTTON_GAME, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL
         );
-        SendMessage(btnCheck, WM_SETFONT, (WPARAM)hFont, TRUE);
+        SendMessage(btnGame, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-        HWND btnClean = CreateWindow(
-            "BUTTON", "Clean Temporary Files",
+        HWND btnMonitor = CreateWindow(
+            "BUTTON", "Monitor Performance",
             WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
             50, 120, 250, 50,
-            hwnd, (HMENU)ID_BUTTON_CLEAN, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL
+            hwnd, (HMENU)ID_BUTTON_MONITOR, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL
         );
-        SendMessage(btnClean, WM_SETFONT, (WPARAM)hFont, TRUE);
+        SendMessage(btnMonitor, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-        HWND btnDisk = CreateWindow(
-            "BUTTON", "Analyze Disk Space",
-            WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-            50, 190, 250, 50,
-            hwnd, (HMENU)ID_BUTTON_DISK, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL
-        );
-        SendMessage(btnDisk, WM_SETFONT, (WPARAM)hFont, TRUE);
-
-        checkTemp = CreateWindow(
-            "BUTTON", "Clean Temp Files",
-            WS_VISIBLE | WS_CHILD | BS_AUTOCHECKBOX,
-            350, 120, 200, 30,
-            hwnd, (HMENU)ID_CHECK_TEMP, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL
-        );
-        SendMessage(checkTemp, WM_SETFONT, (WPARAM)hFont, TRUE);
-
-        checkBrowser = CreateWindow(
-            "BUTTON", "Clean Browser Cache",
-            WS_VISIBLE | WS_CHILD | BS_AUTOCHECKBOX,
-            350, 160, 200, 30,
-            hwnd, (HMENU)ID_CHECK_BROWSER, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL
-        );
-        SendMessage(checkBrowser, WM_SETFONT, (WPARAM)hFont, TRUE);
-
-        progressBar = CreateWindowEx(
-            0, PROGRESS_CLASS, NULL,
-            WS_CHILD | WS_VISIBLE,
-            50, 300, 700, 30,
-            hwnd, (HMENU)ID_PROGRESS_BAR, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL
-        );
-
-        SendMessage(progressBar, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
-        SendMessage(progressBar, PBM_SETPOS, 0, 0);
-
-        listView = CreateWindowEx(
-            WS_EX_CLIENTEDGE, WC_LISTVIEW, "",
-            WS_VISIBLE | WS_CHILD | LVS_REPORT,
-            50, 350, 700, 150,
-            hwnd, (HMENU)ID_LISTVIEW, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL
-        );
-
-        AddListViewColumns(listView);
-
-        HMENU hMenu = CreateMenu();
-        HMENU hFileMenu = CreateMenu();
-        HMENU hHelpMenu = CreateMenu();
-
-        AppendMenu(hFileMenu, MF_STRING, ID_MENU_EXIT, "Exit");
-        AppendMenu(hHelpMenu, MF_STRING, ID_MENU_ABOUT, "About");
-
-        AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hFileMenu, "File");
-        AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hHelpMenu, "Help");
-
-        SetMenu(hwnd, hMenu);
+        AddProcessListView(hwnd, listViewProcesses);
         break;
     }
 
     case WM_COMMAND: {
         switch (LOWORD(wParam)) {
-        case ID_BUTTON_CHECK: {
-            std::string healthInfo = GetSystemHealth();
-            MessageBox(hwnd, healthInfo.c_str(), "System Health", MB_OK | MB_ICONINFORMATION);
+        case ID_BUTTON_GAME: {
+            OptimizeForGaming(hwnd);
             break;
         }
-        case ID_BUTTON_CLEAN: {
-            bool cleanBrowser = SendMessage(checkBrowser, BM_GETCHECK, 0, 0) == BST_CHECKED;
-            CleanTemporaryFiles(hwnd, progressBar, cleanBrowser);
-            break;
-        }
-        case ID_BUTTON_DISK: {
-            std::string diskPath = SelectDisk(hwnd);
-            if (!diskPath.empty()) {
-                std::string diskInfo = AnalyzeDiskSpace(diskPath);
-                MessageBox(hwnd, diskInfo.c_str(), "Disk Space Analysis", MB_OK | MB_ICONINFORMATION);
-            }
-            break;
-        }
-        case ID_MENU_EXIT: {
-            PostQuitMessage(0);
-            break;
-        }
-        case ID_MENU_ABOUT: {
-            ShowAboutDialog(hwnd);
+        case ID_BUTTON_MONITOR: {
+            MonitorPerformance(hwnd);
             break;
         }
         }
@@ -188,8 +110,86 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
-// Fonction pour récupérer l'état du système
-std::string GetSystemHealth() {
+// Fonction principale d'optimisation pour le jeu
+void OptimizeForGaming(HWND hwnd) {
+    std::vector<std::string> unwantedProcesses = { "chrome.exe", "firefox.exe", "Teams.exe" };
+    bool killedProcesses = KillUnwantedProcesses(unwantedProcesses);
+    bool prioritySet = SetHighPriority("game.exe"); // Remplacez "game.exe" par le processus de votre jeu
+
+    std::ostringstream message;
+    if (killedProcesses) {
+        message << "Unwanted processes stopped successfully.\n";
+    } else {
+        message << "Failed to stop some processes.\n";
+    }
+
+    if (prioritySet) {
+        message << "Game priority set to High.\n";
+    } else {
+        message << "Failed to set game priority.\n";
+    }
+
+    MessageBox(hwnd, message.str().c_str(), "Game Optimization", MB_OK | MB_ICONINFORMATION);
+}
+
+// Fonction pour tuer les processus inutiles
+bool KillUnwantedProcesses(const std::vector<std::string>& processesToKill) {
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    PROCESSENTRY32 processEntry;
+    processEntry.dwSize = sizeof(PROCESSENTRY32);
+
+    if (Process32First(hSnapshot, &processEntry)) {
+        do {
+            for (const auto& processName : processesToKill) {
+                if (std::string(processEntry.szExeFile) == processName) {
+                    HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, processEntry.th32ProcessID);
+                    if (hProcess) {
+                        TerminateProcess(hProcess, 0);
+                        CloseHandle(hProcess);
+                    }
+                }
+            }
+        } while (Process32Next(hSnapshot, &processEntry));
+    }
+
+    CloseHandle(hSnapshot);
+    return true;
+}
+
+// Fonction pour attribuer une priorité élevée à un processus
+bool SetHighPriority(const std::string& processName) {
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    PROCESSENTRY32 processEntry;
+    processEntry.dwSize = sizeof(PROCESSENTRY32);
+
+    if (Process32First(hSnapshot, &processEntry)) {
+        do {
+            if (std::string(processEntry.szExeFile) == processName) {
+                HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION, FALSE, processEntry.th32ProcessID);
+                if (hProcess) {
+                    bool result = SetPriorityClass(hProcess, HIGH_PRIORITY_CLASS);
+                    CloseHandle(hProcess);
+                    CloseHandle(hSnapshot);
+                    return result;
+                }
+            }
+        } while (Process32Next(hSnapshot, &processEntry));
+    }
+
+    CloseHandle(hSnapshot);
+    return false;
+}
+
+// Fonction pour surveiller les performances
+void MonitorPerformance(HWND hwnd) {
     MEMORYSTATUSEX memInfo;
     memInfo.dwLength = sizeof(MEMORYSTATUSEX);
     GlobalMemoryStatusEx(&memInfo);
@@ -201,138 +201,80 @@ std::string GetSystemHealth() {
     GetSystemInfo(&sysInfo);
     DWORD cpuCount = sysInfo.dwNumberOfProcessors;
 
-    std::ostringstream healthInfo;
-    healthInfo << "RAM Usage: " << physMemUsed << " MB / " << totalPhysMem << " MB\n";
-    healthInfo << "CPU Cores: " << cpuCount;
+    std::ostringstream monitorInfo;
+    monitorInfo << "CPU Cores: " << cpuCount << "\n";
+    monitorInfo << "RAM Usage: " << physMemUsed << " MB / " << totalPhysMem << " MB";
 
-    return healthInfo.str();
+    MessageBox(hwnd, monitorInfo.str().c_str(), "Performance Monitoring", MB_OK | MB_ICONINFORMATION);
 }
 
-void CleanTemporaryFiles(HWND hwnd, HWND progressBar, bool cleanBrowserCache) {
-    char tempPath[MAX_PATH];
-    GetTempPath(MAX_PATH, tempPath);
+// Ajoute un ListView pour afficher les processus
+void AddProcessListView(HWND hwnd, HWND& listViewProcesses) {
+    listViewProcesses = CreateWindowEx(
+        WS_EX_CLIENTEDGE, WC_LISTVIEW, "",
+        WS_VISIBLE | WS_CHILD | LVS_REPORT,
+        350, 50, 400, 400,
+        hwnd, (HMENU)ID_LISTVIEW_PROCESSES, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL
+    );
 
-    int totalFiles = 0, deletedFiles = 0;
-
-    try {
-        // Compte le nombre total de fichiers
-        for (const auto& entry : std::filesystem::directory_iterator(tempPath)) {
-            totalFiles++;
-        }
-
-        int progress = 0;
-        for (const auto& entry : std::filesystem::directory_iterator(tempPath)) {
-            try {
-                std::filesystem::remove_all(entry.path());
-                deletedFiles++;
-                progress = (deletedFiles * 100) / totalFiles;
-                SendMessage(progressBar, PBM_SETPOS, progress, 0);
-            } catch (...) {
-                // Ignorer les erreurs
-            }
-        }
-
-        // Nettoyer le cache du navigateur si sélectionné
-        if (cleanBrowserCache) {
-            MessageBox(hwnd, "Browser cache cleaning feature not implemented yet.", "Notice", MB_OK | MB_ICONINFORMATION);
-        }
-
-        std::ostringstream msg;
-        msg << "Deleted " << deletedFiles << " temporary files.";
-        MessageBox(hwnd, msg.str().c_str(), "Clean Temporary Files", MB_OK | MB_ICONINFORMATION);
-    } catch (...) {
-        MessageBox(hwnd, "Error cleaning temporary files.", "Error", MB_OK | MB_ICONERROR);
-    }
-
-    SendMessage(progressBar, PBM_SETPOS, 0, 0); // Réinitialise la barre
-}
-
-void AddListViewColumns(HWND hwndListView) {
     LVCOLUMN lvColumn;
     lvColumn.mask = LVCF_TEXT | LVCF_WIDTH;
 
-    // Colonne pour le chemin du fichier
-    lvColumn.cx = 500;
-    lvColumn.pszText = "File Path";
-    ListView_InsertColumn(hwndListView, 0, &lvColumn);
+    lvColumn.cx = 200;
+    lvColumn.pszText = "Process Name";
+    ListView_InsertColumn(listViewProcesses, 0, &lvColumn);
 
-    // Colonne pour la taille des fichiers
     lvColumn.cx = 100;
-    lvColumn.pszText = "Size (KB)";
-    ListView_InsertColumn(hwndListView, 1, &lvColumn);
+    lvColumn.pszText = "PID";
+    ListView_InsertColumn(listViewProcesses, 1, &lvColumn);
+
+    lvColumn.cx = 100;
+    lvColumn.pszText = "Memory (MB)";
+    ListView_InsertColumn(listViewProcesses, 2, &lvColumn);
+
+    PopulateProcessList(listViewProcesses);
 }
 
-void AddListViewItems(HWND hwndListView, const std::vector<std::pair<std::string, std::string>>& files) {
-    ListView_DeleteAllItems(hwndListView);
-
-    for (size_t i = 0; i < files.size(); ++i) {
-        LVITEM lvItem;
-
-        // Ajoute le chemin du fichier
-        lvItem.mask = LVIF_TEXT;
-        lvItem.iItem = i;
-        lvItem.iSubItem = 0;
-        lvItem.pszText = const_cast<char*>(files[i].first.c_str());
-        ListView_InsertItem(hwndListView, &lvItem);
-
-        // Ajoute la taille du fichier
-        lvItem.iSubItem = 1;
-        lvItem.pszText = const_cast<char*>(files[i].second.c_str());
-        ListView_SetItem(hwndListView, &lvItem);
+// Remplit le ListView avec les processus en cours
+void PopulateProcessList(HWND listViewProcesses) {
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE) {
+        return;
     }
-}
 
-std::vector<std::pair<std::string, std::string>> ListTemporaryFiles() {
-    char tempPath[MAX_PATH];
-    GetTempPath(MAX_PATH, tempPath);
+    PROCESSENTRY32 processEntry;
+    processEntry.dwSize = sizeof(PROCESSENTRY32);
 
-    std::vector<std::pair<std::string, std::string>> fileList;
+    int index = 0;
+    if (Process32First(hSnapshot, &processEntry)) {
+        do {
+            LVITEM lvItem;
+            lvItem.mask = LVIF_TEXT;
+            lvItem.iItem = index++;
+            lvItem.iSubItem = 0;
+            lvItem.pszText = processEntry.szExeFile;
+            ListView_InsertItem(listViewProcesses, &lvItem);
 
-    try {
-        for (const auto& entry : std::filesystem::directory_iterator(tempPath)) {
-            if (entry.is_regular_file()) {
-                auto fileSize = std::filesystem::file_size(entry.path()) / 1024; // Taille en KB
-                fileList.emplace_back(entry.path().string(), std::to_string(fileSize));
+            lvItem.iSubItem = 1;
+            std::ostringstream pid;
+            pid << processEntry.th32ProcessID;
+            lvItem.pszText = const_cast<char*>(pid.str().c_str());
+            ListView_SetItem(listViewProcesses, &lvItem);
+
+            HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processEntry.th32ProcessID);
+            if (hProcess) {
+                PROCESS_MEMORY_COUNTERS pmc;
+                if (GetProcessMemoryInfo(hProcess, &pmc, sizeof(pmc))) {
+                    lvItem.iSubItem = 2;
+                    std::ostringstream memory;
+                    memory << pmc.WorkingSetSize / (1024 * 1024);
+                    lvItem.pszText = const_cast<char*>(memory.str().c_str());
+                    ListView_SetItem(listViewProcesses, &lvItem);
+                }
+                CloseHandle(hProcess);
             }
-        }
-    } catch (...) {
-        // Ignorer les erreurs
+        } while (Process32Next(hSnapshot, &processEntry));
     }
 
-    return fileList;
-}
-
-std::string AnalyzeDiskSpace(const std::string& path) {
-    ULARGE_INTEGER freeBytesAvailable, totalBytes, totalFreeBytes;
-
-    if (GetDiskFreeSpaceEx(path.c_str(), &freeBytesAvailable, &totalBytes, &totalFreeBytes)) {
-        std::ostringstream diskInfo;
-        diskInfo << "Disk: " << path << "\n";
-        diskInfo << "Total Disk Space: " << totalBytes.QuadPart / (1024 * 1024 * 1024) << " GB\n";
-        diskInfo << "Free Disk Space: " << totalFreeBytes.QuadPart / (1024 * 1024 * 1024) << " GB\n";
-        diskInfo << "Used Disk Space: "
-                 << (totalBytes.QuadPart - totalFreeBytes.QuadPart) / (1024 * 1024 * 1024) << " GB";
-        return diskInfo.str();
-    }
-
-    return "Error retrieving disk space information.";
-}
-
-std::string SelectDisk(HWND hwnd) {
-    char path[MAX_PATH] = "";
-    BROWSEINFO bi = { 0 };
-    bi.lpszTitle = "Select a Disk";
-    LPITEMIDLIST pidl = SHBrowseForFolder(&bi);
-
-    if (pidl != 0) {
-        SHGetPathFromIDList(pidl, path);
-        return std::string(path);
-    }
-    return "";
-}
-
-void ShowAboutDialog(HWND hwnd) {
-    MessageBox(hwnd,
-        "Windows Boost Utils (WBU)\nVersion 3.0\nCreated by You",
-        "About WBU", MB_OK | MB_ICONINFORMATION);
+    CloseHandle(hSnapshot);
 }
