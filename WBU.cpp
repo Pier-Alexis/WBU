@@ -6,13 +6,15 @@
 
 #define ID_BUTTON_CHECK 1
 #define ID_BUTTON_CLEAN 2
-#define ID_MENU_EXIT 3
-#define ID_MENU_ABOUT 4
+#define ID_BUTTON_DISK 3
+#define ID_MENU_EXIT 4
+#define ID_MENU_ABOUT 5
 
 // Prototypes
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 std::string GetSystemHealth();
 void CleanTemporaryFiles(HWND hwnd);
+std::string AnalyzeDiskSpace();
 void ShowAboutDialog(HWND hwnd);
 
 // Point d'entrée principal
@@ -23,6 +25,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = hInstance;
     wc.lpszClassName = CLASS_NAME;
+    wc.hbrBackground = CreateSolidBrush(RGB(240, 240, 240)); // Couleur de fond
 
     RegisterClass(&wc);
 
@@ -31,7 +34,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         CLASS_NAME,
         "Windows Boost Utils (WBU)",
         WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 500, 300,
+        CW_USEDEFAULT, CW_USEDEFAULT, 600, 400,
         NULL,
         NULL,
         hInstance,
@@ -57,20 +60,34 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
     case WM_CREATE: {
-        // Ajouter les boutons
-        CreateWindow(
+        // Ajouter les boutons avec des styles personnalisés
+        HFONT hFont = CreateFont(20, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, ANSI_CHARSET,
+                                 OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                                 DEFAULT_PITCH | FF_SWISS, "Segoe UI");
+
+        HWND btnCheck = CreateWindow(
             "BUTTON", "Check System Health",
             WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-            50, 50, 200, 50,
+            50, 50, 250, 50,
             hwnd, (HMENU)ID_BUTTON_CHECK, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL
         );
+        SendMessage(btnCheck, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-        CreateWindow(
+        HWND btnClean = CreateWindow(
             "BUTTON", "Clean Temporary Files",
             WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-            50, 120, 200, 50,
+            50, 120, 250, 50,
             hwnd, (HMENU)ID_BUTTON_CLEAN, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL
         );
+        SendMessage(btnClean, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        HWND btnDisk = CreateWindow(
+            "BUTTON", "Analyze Disk Space",
+            WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+            50, 190, 250, 50,
+            hwnd, (HMENU)ID_BUTTON_DISK, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL
+        );
+        SendMessage(btnDisk, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         // Ajouter un menu
         HMENU hMenu = CreateMenu();
@@ -96,6 +113,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
         case ID_BUTTON_CLEAN: {
             CleanTemporaryFiles(hwnd);
+            break;
+        }
+        case ID_BUTTON_DISK: {
+            std::string diskInfo = AnalyzeDiskSpace();
+            MessageBox(hwnd, diskInfo.c_str(), "Disk Space Analysis", MB_OK | MB_ICONINFORMATION);
             break;
         }
         case ID_MENU_EXIT: {
@@ -162,9 +184,25 @@ void CleanTemporaryFiles(HWND hwnd) {
     }
 }
 
+// Fonction pour analyser l'espace disque
+std::string AnalyzeDiskSpace() {
+    ULARGE_INTEGER freeBytesAvailable, totalBytes, totalFreeBytes;
+
+    if (GetDiskFreeSpaceEx(NULL, &freeBytesAvailable, &totalBytes, &totalFreeBytes)) {
+        std::ostringstream diskInfo;
+        diskInfo << "Total Disk Space: " << totalBytes.QuadPart / (1024 * 1024 * 1024) << " GB\n";
+        diskInfo << "Free Disk Space: " << totalFreeBytes.QuadPart / (1024 * 1024 * 1024) << " GB\n";
+        diskInfo << "Used Disk Space: "
+                 << (totalBytes.QuadPart - totalFreeBytes.QuadPart) / (1024 * 1024 * 1024) << " GB";
+        return diskInfo.str();
+    }
+
+    return "Error retrieving disk space information.";
+}
+
 // Fonction pour afficher une boîte de dialogue À propos
 void ShowAboutDialog(HWND hwnd) {
     MessageBox(hwnd,
-        "Windows Boost Utils (WBU)\nVersion 1.0\nCreated by You",
+        "Windows Boost Utils (WBU)\nVersion 2.0\nCreated by You",
         "About WBU", MB_OK | MB_ICONINFORMATION);
 }
